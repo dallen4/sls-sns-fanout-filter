@@ -1,0 +1,240 @@
+service: sls-sns-fanout-filter-demo
+frameworkVersion: '3'
+useDotenv: true
+
+package:
+  individually: true
+
+provider:
+  name: aws
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+  runtime: nodejs16.x
+  environment:
+    STAGE: ${self:provider.stage, env:feature_branch_env}
+plugins:
+  - serverless-offline
+functions:
+  messagEmitter:
+    handler: src/messageEmitter.handler
+    role: messagEmitterRole
+    environment:
+      SNS_TOPIC: !Ref rootTopic
+    events:
+      - httpApi:
+          method: post
+          path: /test-fanout
+
+  fooTargetLambda:
+    handler: src/fooTarget.handler
+    role: fooTargetLambdaRole
+    environment:
+      QUEUE_NAME: !Ref fooTargetQueue
+    events:
+      - sqs:
+          arn: !GetAtt fooTargetQueue.Arn
+
+  barTargetLambda:
+    handler: src/barTarget.handler
+    role: barTargetLambdaRole
+    environment:
+      QUEUE_NAME: !Ref barTargetQueue
+    events:
+      - sqs:
+          arn: !GetAtt barTargetQueue.Arn
+
+resources:
+  Resources:
+    rootTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        DisplayName: Topic where sailings change events are published.
+        TopicName: rootTopic-${opt:stage, 'dev'}
+
+    fooTargetQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: fooTargetQueue-${opt:stage, 'dev'}
+        VisibilityTimeout: 60
+
+    fooTargetQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: sns.amazonaws.com
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt fooTargetQueue.Arn
+        Queues:
+          - !Ref fooTargetQueue
+
+    fooTargetQueueSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        TopicArn: !Ref rootTestTopic
+        Endpoint: !GetAtt fooTargetQueue.Arn
+        RawMessageDelivery: true
+        FilterPolicyScope: MessageAttributes
+        FilterPolicy:
+          event_type: [FOO]
+
+    barTargetQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: barTargetQueue-${opt:stage, 'dev'}
+        VisibilityTimeout: 60
+
+    barTargetQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: sns.amazonaws.com
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt barTargetQueue.Arn
+        Queues:
+          - !Ref barTargetQueue
+
+    barTargetQueueSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        TopicArn: !Ref rootTestTopic
+        Endpoint: !GetAtt barTargetQueue.Arn
+        RawMessageDelivery: true
+        FilterPolicyScope: MessageAttributes
+        FilterPolicy:
+          event_type: [BAR]
+
+    messagEmitterRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+        Policies:
+          - PolicyName: messagEmitterSNSPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'sns:Publish'
+                  Resource:
+                    - !Ref rootTestTopic
+          - PolicyName: messagEmitterLoggingPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'logs:CreateLogGroup'
+                    - 'logs:CreateLogStream'
+                    - 'logs:PutLogEvents'
+                  Resource:
+                    - 'Fn::Join':
+                      - ':'
+                      -
+                        - 'arn:aws:logs'
+                        - Ref: 'AWS::Region'
+                        - Ref: 'AWS::AccountId'
+                        - 'log-group:/aws/lambda/*:*:*'
+
+    fooTargetLambdaRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+        Policies:
+          - PolicyName: fooTargetLambdaSNSPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'sqs:DeleteMessage'
+                    - 'sqs:GetQueueAttributes'
+                    - 'sqs:ReceiveMessage'
+                  Resource:
+                    - !GetAtt fooTargetQueue.Arn
+          - PolicyName: fooTargetLambdaLoggingPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'logs:CreateLogGroup'
+                    - 'logs:CreateLogStream'
+                    - 'logs:PutLogEvents'
+                  Resource:
+                    - 'Fn::Join':
+                      - ':'
+                      -
+                        - 'arn:aws:logs'
+                        - Ref: 'AWS::Region'
+                        - Ref: 'AWS::AccountId'
+                        - 'log-group:/aws/lambda/*:*:*'
+
+    barTargetLambdaRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+        Policies:
+          - PolicyName: barTargetLambdaSNSPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'sqs:DeleteMessage'
+                    - 'sqs:GetQueueAttributes'
+                    - 'sqs:ReceiveMessage'
+                  Resource:
+                    - !GetAtt barTargetQueue.Arn
+          - PolicyName: barTargetLambdaLoggingPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'logs:CreateLogGroup'
+                    - 'logs:CreateLogStream'
+                    - 'logs:PutLogEvents'
+                  Resource:
+                    - 'Fn::Join':
+                      - ':'
+                      -
+                        - 'arn:aws:logs'
+                        - Ref: 'AWS::Region'
+                        - Ref: 'AWS::AccountId'
+                        - 'log-group:/aws/lambda/*:*:*'

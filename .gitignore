@@ -1,0 +1,20 @@
+*.log
+npm-debug.log*
+node_modules/
+.DS_Store
+.serverless/
+coverage/
+test/coverage/
+.env*
+!.env.example
+.build
+scripts/aws_environment_commands.js
+
+# Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+**/.terraform.lock.hcl
+terraform/one-cart-iam-roles/outputs.json
